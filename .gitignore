@@ -1,0 +1,30 @@
+# Terraform local state and working directories
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+
+# Local overrides
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Terraform CLI configuration (may contain credentials/tokens)
+.terraformrc
+terraform.rc
+
+# Environment files (keep only examples)
+.env
+.env.*
+!.env.example
+
+# Private keys and certificates
+*.pem
+*.key
+
+# OS files
+.DS_Store
+Thumbs.db
