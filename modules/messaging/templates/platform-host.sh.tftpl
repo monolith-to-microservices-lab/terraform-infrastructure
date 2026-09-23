@@ -1,0 +1,38 @@
+#!/bin/bash
+# Platform host first boot (ECS-optimized Amazon Linux 2023).
+# 1. mount the persistent data volume at /data (format only if blank)
+# 2. join the ECS cluster with the placement attribute
+# The ECS agent starts after cloud-init, so tasks never see an unmounted /data.
+set -euo pipefail
+
+DEVICE="/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${volume_id}"
+
+echo "waiting for data volume ${volume_id}..."
+for _ in $(seq 1 60); do
+  [ -e "$${DEVICE}" ] && break
+  sleep 5
+done
+[ -e "$${DEVICE}" ] || { echo "data volume never attached"; exit 1; }
+
+if ! blkid "$${DEVICE}" >/dev/null 2>&1; then
+  echo "blank volume: creating filesystem"
+  mkfs -t xfs "$${DEVICE}"
+fi
+
+mkdir -p /data
+UUID="$(blkid -s UUID -o value "$${DEVICE}")"
+grep -q "$${UUID}" /etc/fstab || echo "UUID=$${UUID} /data xfs defaults,nofail 0 2" >> /etc/fstab
+mount -a
+
+# apache/kafka runs as uid 1000.
+mkdir -p /data/kafka
+chown -R 1000:1000 /data/kafka
+
+cat >> /etc/ecs/ecs.config <<EOF
+ECS_CLUSTER=${cluster_name}
+ECS_INSTANCE_ATTRIBUTES={"${attribute_name}":"${attribute_value}"}
+ECS_ENABLE_TASK_IAM_ROLE=true
+ECS_ENABLE_TASK_IAM_ROLE_NETWORK_HOST=true
+ECS_ENABLE_CONTAINER_METADATA=true
+ECS_CONTAINER_STOP_TIMEOUT=60s
+EOF
