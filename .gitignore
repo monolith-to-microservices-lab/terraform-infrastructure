@@ -28,3 +28,13 @@ terraform.rc
 # OS files
 .DS_Store
 Thumbs.db
+
+# Account/person-specific inputs (examples are versioned)
+terraform.tfvars
+*.secret.tfvars
+backend.hcl
+
+# Saved plans and their rendered output (may contain sensitive values)
+plans/
+*.tfplan.txt
+*.tfplan.json
