@@ -1,0 +1,14 @@
+# Copy to terraform.tfvars (git-ignored) and adjust.
+# No credentials here: authentication comes from AWS_PROFILE / SSO.
+
+# REQUIRED - choose explicitly. us-east-1 is the cheapest region for most of
+# the services used by this lab (see docs/cost-estimate.md). sa-east-1 is
+# closer to Brazil but roughly 40-60% more expensive.
+aws_region = "us-east-1"
+
+# Cost guardrail (alerting only).
+monthly_budget_usd  = 150
+budget_alert_emails = [] # e.g. ["you@example.com"]
+
+# If the account already has the GitHub OIDC provider, reuse it:
+# existing_github_oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
