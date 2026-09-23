@@ -1,0 +1,4 @@
+# Copy to backend.hcl (git-ignored) or let scripts/bootstrap.ps1 generate it.
+# terraform init -backend-config=backend.hcl
+bucket = "mtm-tfstate-123456789012-us-east-1"
+region = "us-east-1"
