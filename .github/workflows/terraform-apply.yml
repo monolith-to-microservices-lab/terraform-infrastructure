@@ -1,0 +1,136 @@
+# Controlled apply: MANUAL trigger only (workflow_dispatch), main branch only.
+#
+#   plan   read-only role; saved plan stored in the PRIVATE state bucket
+#          (never as a GitHub artifact: this repository is public)
+#   apply  runs in GitHub Environment "dev" -> required reviewers approve after
+#          reading the plan summary; applies exactly the reviewed saved plan
+#
+# No -auto-approve: applying a saved plan file applies only what was reviewed,
+# and Terraform rejects it if the state changed in between (stale plan).
+name: terraform-apply
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to apply
+        type: choice
+        options: [dev]
+        default: dev
+      allow_destroy:
+        description: Allow a plan that destroys resources (explain each one first)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-apply-${{ inputs.environment }}
+  cancel-in-progress: false
+
+env:
+  TF_VERSION: 1.16.4
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+  TF_VAR_allowed_ingress_cidrs: ${{ vars.TF_ALLOWED_INGRESS_CIDRS }}
+  TF_VAR_permissions_boundary_arn: ${{ vars.TF_PERMISSIONS_BOUNDARY_ARN }}
+  PLAN_KEY: ci-plans/${{ inputs.environment }}/${{ github.run_id }}.tfplan
+
+jobs:
+  plan:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      exitcode: ${{ steps.plan.outputs.exitcode }}
+      destroy: ${{ steps.summary.outputs.destroy }}
+    defaults:
+      run:
+        working-directory: environments/${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - run: terraform init -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" -backend-config="region=${{ vars.AWS_REGION }}"
+
+      - name: terraform plan
+        id: plan
+        run: |
+          set +e
+          terraform plan -lock-timeout=120s -detailed-exitcode -no-color -out=apply.tfplan > plan.log 2>&1
+          code=$?
+          set -e
+          echo "exitcode=$code" >> "$GITHUB_OUTPUT"
+          if [ "$code" -eq 1 ]; then grep -E "^(Error|│)" plan.log | head -40; exit 1; fi
+
+      - name: summary + store plan privately
+        id: summary
+        if: steps.plan.outputs.exitcode == '2'
+        run: |
+          terraform show -json apply.tfplan > plan.json
+          add=$(jq '[.resource_changes[] | select(.change.actions | index("create"))] | length' plan.json)
+          change=$(jq '[.resource_changes[] | select(.change.actions | index("update"))] | length' plan.json)
+          destroy=$(jq '[.resource_changes[] | select(.change.actions | index("delete"))] | length' plan.json)
+          echo "destroy=$destroy" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Plan for ${{ inputs.environment }}: ${add} to add, ${change} to change, ${destroy} to destroy"
+            jq -r '.resource_changes[] | select(.change.actions != ["no-op"] and .change.actions != ["read"]) | "- `\(.address)`: \(.change.actions | join(","))"' plan.json
+          } >> "$GITHUB_STEP_SUMMARY"
+          aws s3 cp apply.tfplan "s3://${{ vars.TF_STATE_BUCKET }}/${PLAN_KEY}" --only-show-errors
+          rm -f plan.json apply.tfplan plan.log
+
+      - name: no changes
+        if: steps.plan.outputs.exitcode == '0'
+        run: echo "### No changes for ${{ inputs.environment }}" >> "$GITHUB_STEP_SUMMARY"
+
+  apply:
+    needs: plan
+    if: needs.plan.outputs.exitcode == '2'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }} # required reviewers approve here
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: environments/${{ inputs.environment }}
+    steps:
+      - name: destroy guard
+        if: needs.plan.outputs.destroy != '0' && !inputs.allow_destroy
+        run: |
+          echo "::error::The plan destroys ${{ needs.plan.outputs.destroy }} resource(s). Re-run with allow_destroy after explaining each one."
+          exit 1
+
+      - uses: actions/checkout@v5
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - run: terraform init -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" -backend-config="region=${{ vars.AWS_REGION }}"
+
+      - name: terraform apply (reviewed saved plan)
+        run: |
+          aws s3 cp "s3://${{ vars.TF_STATE_BUCKET }}/${PLAN_KEY}" apply.tfplan --only-show-errors
+          terraform apply -lock-timeout=120s -no-color apply.tfplan > apply.log 2>&1 || { grep -E "^(Error|│)" apply.log | head -40; exit 1; }
+          grep -E "^Apply complete" apply.log >> "$GITHUB_STEP_SUMMARY"
+          aws s3 rm "s3://${{ vars.TF_STATE_BUCKET }}/${PLAN_KEY}" --only-show-errors

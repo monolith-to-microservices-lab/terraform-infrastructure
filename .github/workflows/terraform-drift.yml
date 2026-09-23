@@ -1,0 +1,80 @@
+# Drift detection: what changed in AWS OUTSIDE Terraform?
+#
+# `terraform plan -refresh-only -detailed-exitcode` (read-only role):
+#   0 = no drift          -> green
+#   2 = drift detected    -> red job + list of drifted resources
+#   1 = error             -> red job
+# Never applies anything and never updates the state. Resolution is a human
+# decision (revert via plan/apply, or adopt by editing the configuration).
+name: terraform-drift
+
+on:
+  workflow_dispatch:
+  # Enable once the environment exists (weekdays 09:00 UTC):
+  # schedule:
+  #   - cron: "0 9 * * 1-5"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-drift
+  cancel-in-progress: false
+
+env:
+  TF_VERSION: 1.16.4
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+
+jobs:
+  drift:
+    if: vars.AWS_PLAN_ROLE_ARN != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: environments/dev
+    env:
+      TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+      TF_VAR_allowed_ingress_cidrs: ${{ vars.TF_ALLOWED_INGRESS_CIDRS }}
+      TF_VAR_permissions_boundary_arn: ${{ vars.TF_PERMISSIONS_BOUNDARY_ARN }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - run: terraform init -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" -backend-config="region=${{ vars.AWS_REGION }}"
+
+      - name: terraform plan -refresh-only
+        id: drift
+        run: |
+          set +e
+          terraform plan -refresh-only -lock-timeout=120s -detailed-exitcode -no-color -out=drift.tfplan > drift.log 2>&1
+          code=$?
+          set -e
+          echo "exitcode=$code" >> "$GITHUB_OUTPUT"
+          if [ "$code" -eq 1 ]; then grep -E "^(Error|│)" drift.log | head -40; exit 1; fi
+          if [ "$code" -eq 0 ]; then
+            echo "### No drift in dev" >> "$GITHUB_STEP_SUMMARY"
+          else
+            terraform show -json drift.tfplan > drift.json
+            {
+              echo "### :warning: Drift detected in dev (changed outside Terraform)"
+              jq -r '.resource_drift[]? | "- `\(.address)`: \(.change.actions | join(","))"' drift.json
+              echo ""
+              echo "Nothing was changed. Run scripts/drift-check.ps1 locally to see attribute-level details, then revert (plan/apply) or adopt (edit config)."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Drift detected in dev"
+          fi
+          rm -f drift.tfplan drift.json drift.log
+          exit "$code"
