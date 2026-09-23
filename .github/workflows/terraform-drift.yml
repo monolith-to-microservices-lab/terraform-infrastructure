@@ -41,14 +41,14 @@ jobs:
       TF_VAR_allowed_ingress_cidrs: ${{ vars.TF_ALLOWED_INGRESS_CIDRS }}
       TF_VAR_permissions_boundary_arn: ${{ vars.TF_PERMISSIONS_BOUNDARY_ARN }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}

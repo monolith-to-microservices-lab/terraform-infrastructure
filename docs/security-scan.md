@@ -10,7 +10,7 @@
 
 Checkov foi descartado por sobrepor ~90% das regras do Trivy e acrescentar outro runtime (Python).
 
-Local: `./scripts/validate.ps1`. CI: job `static` do `terraform-ci.yml`.
+Local: `./scripts/validate.ps1`. CI: job **Terraform Validate** (`ci.yml`) e job **Security** (`security.yml`: Trivy + Gitleaks).
 
 ## Achados corrigidos
 

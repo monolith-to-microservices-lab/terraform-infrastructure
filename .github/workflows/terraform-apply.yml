@@ -52,14 +52,14 @@ jobs:
       run:
         working-directory: environments/${{ inputs.environment }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
@@ -114,14 +114,14 @@ jobs:
           echo "::error::The plan destroys ${{ needs.plan.outputs.destroy }} resource(s). Re-run with allow_destroy after explaining each one."
           exit 1
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}

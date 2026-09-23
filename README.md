@@ -57,7 +57,7 @@ terraform-infrastructure/
 │       ├── backend.hcl.example      # bucket/região do state -> backend.hcl (ignorado)
 │       └── tests/                   # terraform test com provider mockado (plan offline)
 ├── scripts/              # PowerShell: bootstrap, init, validate, plan, apply, drift-check, state-info, discover-aws
-├── .github/workflows/    # terraform-ci (PR), terraform-apply (manual), terraform-drift (manual/cron)
+├── .github/workflows/    # ci (PR), terraform-apply (manual), terraform-drift (manual/cron)
 └── docs/
 ```
 
@@ -223,7 +223,9 @@ então `terraform apply plans/destroy.tfplan`. **Sempre com autorização explí
 
 | Workflow | Gatilho | O que faz |
 |---|---|---|
-| `terraform-ci` | PR, push em `main` | fmt, validate, testes offline, tflint, trivy; depois `plan -detailed-exitcode` via OIDC (read-only) e comentário no PR. **Nunca aplica** |
+| `ci.yml` → **Terraform Validate** | PR e push em `main` | `fmt -check`, `init -backend=false`, `validate`, `terraform test` (plan offline com provider mockado), tflint. **Sem AWS** |
+| `ci.yml` → **Terraform Plan** | PR e push em `main` | `plan -detailed-exitcode` via OIDC (read-only) e comentário no PR. **Pulado automaticamente** enquanto as variáveis AWS do repositório não existem. Nunca aplica |
+| `security.yml` → **Security** | PR, push em `main`, semanal | Gitleaks (histórico completo) + Trivy config (SARIF → Code Scanning) |
 | `terraform-apply` | `workflow_dispatch` (manual, só `main`) | plan (salvo no bucket **privado** de state) → aprovação do GitHub Environment `dev` → apply do plano salvo; bloqueia destroy sem `allow_destroy` |
 | `terraform-drift` | manual (cron pronto, comentado) | `plan -refresh-only -detailed-exitcode`; falha o job se houver drift; nunca aplica |
 
